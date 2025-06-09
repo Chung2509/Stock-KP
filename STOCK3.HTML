@@ -1,0 +1,1502 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>บันทึกการซื้อขายหุ้น</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Corrected script loading order for Chart.js and date-fns adapter -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/date-fns@2.30.0/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.min.js"></script>
+    <script>
+        // This block runs AFTER all Chart.js and date-fns related libraries are loaded.
+        // Ensure dateFns is globally available for the adapter.
+        if (typeof dateFns !== 'undefined') {
+            window.dateFns = dateFns;
+        } else if (typeof window.dateFns === 'undefined' && typeof window['date-fns'] !== 'undefined') {
+            // Some builds might put it under window['date-fns']
+            window.dateFns = window['date-fns'];
+        }
+        // Explicitly set the adapter's dateFns reference if Chart.js and date-fns are loaded
+        if (typeof Chart !== 'undefined' && typeof Chart.adapters !== 'undefined' && typeof Chart.adapters.date !== 'undefined' && typeof window.dateFns !== 'undefined') {
+            Chart.adapters.date.dateFns = window.dateFns;
+        } else {
+            console.error("Chart.js or date-fns or its adapter not fully loaded for adapter configuration.");
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Sarabun', sans-serif; background-color: #f5f5f4; /* stone-100 */ }
+        .sidebar-link { display: block; padding: 0.75rem 1rem; margin-bottom: 0.5rem; border-radius: 0.375rem; transition: background-color 0.2s; }
+        .sidebar-link:hover { background-color: #e7e5e4; /* stone-200 */ }
+        .sidebar-link.active { background-color: #0284c7; /* sky-600 */ color: white; }
+        .content-section { display: none; }
+        .content-section.active { display: block; }
+        .form-input { border-color: #d6d3d1; /* stone-300 */ }
+        .form-input:focus { border-color: #0284c7; /* sky-600 */ box-shadow: 0 0 0 0.2rem rgba(2, 132, 199, 0.25); }
+        .btn-primary { background-color: #0284c7; /* sky-600 */ color: white; }
+        .btn-primary:hover { background-color: #0369a1; /* sky-700 */ }
+        .btn-secondary { background-color: #a8a29e; /* stone-400 */ color: white; }
+        .btn-secondary:hover { background-color: #78716c; /* stone-500 */ }
+        .btn-danger { background-color: #dc2626; /* red-600 */ color: white; }
+        .btn-danger:hover { background-color: #b91c1c; /* red-700 */ }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                /* No fixed height, let Chart.js manage */
+            }
+        }
+        /* Custom scrollbar for transaction list */
+        .transaction-list-container { max-height: 400px; overflow-y: auto; }
+        .transaction-list-container::-webkit-scrollbar { width: 8px; }
+        .transaction-list-container::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
+        .transaction-list-container::-webkit-scrollbar-thumb { background: #a8a29e; /* stone-400 */ border-radius: 10px; }
+        .transaction-list-container::-webkit-scrollbar-thumb:hover { background: #78716c; /* stone-500 */ }
+
+        /* Modal styles */
+        .modal { display: none; position: fixed; z-index: 50; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+        .modal-content { background-color: #fefefe; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 500px; border-radius: 0.5rem; }
+        .modal-close-button { color: #aaa; float: right; font-size: 28px; font-weight: bold; }
+        .modal-close-button:hover, .modal-close-button:focus { color: black; text-decoration: none; cursor: pointer; }
+    </style>
+</head>
+<body class="flex flex-col md:flex-row h-screen bg-stone-100 text-stone-800">
+
+    <aside class="w-full md:w-64 bg-white p-4 space-y-2 shadow-lg">
+        <h1 class="text-2xl font-bold text-sky-700 mb-6 text-center">StockLog TH</h1>
+        <nav>
+            <a href="#" id="nav-overview" class="sidebar-link active" data-section="overview">ภาพรวมพอร์ต</a>
+            <a href="#" id="nav-add-tx" class="sidebar-link" data-section="add-transaction">บันทึกรายการ</a>
+            <a href="#" id="nav-add-dividend" class="sidebar-link" data-section="add-dividend">บันทึกเงินปันผล</a> <a href="#" id="nav-transactions" class="sidebar-link" data-section="transactions-log">ประวัติรายการ</a>
+            <a href="#" id="nav-reports" class="sidebar-link" data-section="reports">รายงาน</a>
+            <a href="#" id="nav-settings" class="sidebar-link" data-section="settings">ตั้งค่า</a>
+        </nav>
+        <div class="mt-auto pt-4 border-t border-stone-200">
+            <p class="text-xs text-stone-500 text-center">&copy; 2024 StockLog TH</p>
+        </div>
+    </aside>
+
+    <main class="flex-1 p-6 overflow-y-auto">
+        <section id="overview" class="content-section active">
+            <h2 class="text-3xl font-semibold mb-6 text-sky-700">ภาพรวมพอร์ตโฟลิโอ</h2>
+            <p class="mb-6 text-stone-600">ส่วนนี้จะแสดงภาพรวมของพอร์ตการลงทุนปัจจุบันของคุณ รวมถึงมูลค่ารวม, กำไร/ขาดทุนที่ยังไม่เกิดขึ้น และสัดส่วนการลงทุนในหุ้นแต่ละตัว คุณสามารถดูรายละเอียดของหุ้นที่ถือครองและปรับปรุงราคาตลาดล่าสุดได้ในส่วน "ตั้งค่า > ราคาตลาด" เพื่อให้การคำนวณแม่นยำยิ่งขึ้น</p>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-lg font-medium text-stone-500">มูลค่าพอร์ตทั้งหมด</h3>
+                    <p id="totalPortfolioValue" class="text-3xl font-bold text-sky-600">฿0.00</p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-lg font-medium text-stone-500">ต้นทุนพอร์ตทั้งหมด</h3>
+                    <p id="totalPortfolioCost" class="text-3xl font-bold text-stone-600">฿0.00</p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-lg font-medium text-stone-500">กำไร/ขาดทุน (ยังไม่เกิด - ไม่รวมปันผล)</h3>
+                    <p id="totalUnrealizedPL" class="text-3xl font-bold">฿0.00</p>
+                </div>
+                <!-- New: Realized P/L (Capital Gains Only) -->
+                 <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-lg font-medium text-stone-500">กำไร/ขาดทุน (เกิดขึ้นแล้ว - ไม่รวมปันผล)</h3>
+                    <p id="totalRealizedCapitalPLEl" class="text-3xl font-bold">฿0.00</p>
+                </div>
+                <!-- End New -->
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-lg font-medium text-stone-500">เงินปันผลที่ได้รับทั้งหมด</h3>
+                    <p id="totalDividendsReceivedEl" class="text-3xl font-bold text-green-600">฿0.00</p>
+                </div>
+                <!-- Existing: Total Realized P/L (including dividends) -->
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-lg font-medium text-stone-500">กำไร/ขาดทุน (เกิดขึ้นแล้ว - รวมปันผล)</h3>
+                    <p id="totalRealizedPL" class="text-3xl font-bold">฿0.00</p>
+                </div>
+                <!-- Existing: Total Portfolio P/L (Unrealized + Realized Dividends) -->
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-lg font-medium text-stone-500">กำไร/ขาดทุนรวมพอร์ต (รวมปันผลและที่ยังไม่เกิด)</h3>
+                    <p id="totalPortfolioPLWithDividendsEl" class="text-3xl font-bold">฿0.00</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold mb-4">หุ้นที่ถือครอง</h3>
+                    <div id="portfolioHoldings" class="space-y-3 transaction-list-container pr-2">
+                        <p class="text-stone-500">ไม่มีหุ้นในพอร์ต</p>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold mb-4">สัดส่วนพอร์ตโฟลิโอ</h3>
+                    <div class="chart-container">
+                        <canvas id="portfolioPieChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="add-transaction" class="content-section">
+            <h2 class="text-3xl font-semibold mb-6 text-sky-700">บันทึกรายการซื้อขาย</h2>
+             <p class="mb-6 text-stone-600">กรอกรายละเอียดการซื้อหรือขายหุ้นของคุณที่นี่ เมื่อบันทึกแล้ว ข้อมูลจะถูกนำไปคำนวณในภาพรวมพอร์ตและรายงานต่างๆ คุณสามารถเลือกกลุ่มของรายการเพื่อช่วยในการวิเคราะห์ภายหลังได้</p>
+            <form id="stockTransactionForm" class="bg-white p-8 rounded-lg shadow space-y-6 max-w-2xl mx-auto">
+                <div>
+                    <label for="stockTxDate" class="block text-sm font-medium text-stone-700 mb-1">วันที่ทำรายการ</label>
+                    <input type="date" id="stockTxDate" name="txDate" class="form-input w-full p-2 border rounded-md" required>
+                </div>
+                <div>
+                    <label for="stockTxTicker" class="block text-sm font-medium text-stone-700 mb-1">ชื่อย่อหลักทรัพย์ (Ticker)</label>
+                    <input type="text" id="stockTxTicker" name="txTicker" placeholder="เช่น AOT, CPALL" class="form-input w-full p-2 border rounded-md" required>
+                </div>
+                <div>
+                    <label for="stockTxType" class="block text-sm font-medium text-stone-700 mb-1">ประเภทรายการ</label>
+                    <select id="stockTxType" name="txType" class="form-input w-full p-2 border rounded-md" required>
+                        <option value="buy">ซื้อ (Buy)</option>
+                        <option value="sell">ขาย (Sell)</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="stockTxQuantity" class="block text-sm font-medium text-stone-700 mb-1">จำนวนหุ้น</label>
+                    <input type="number" id="stockTxQuantity" name="txQuantity" placeholder="0" min="1" class="form-input w-full p-2 border rounded-md" required>
+                </div>
+                <div>
+                    <label for="stockTxPrice" class="block text-sm font-medium text-stone-700 mb-1">ราคาต่อหุ้น (บาท)</label>
+                    <input type="number" id="stockTxPrice" name="txPrice" placeholder="0.00" step="0.01" min="0" class="form-input w-full p-2 border rounded-md" required>
+                </div>
+                <div>
+                    <label for="stockTxCommission" class="block text-sm font-medium text-stone-700 mb-1">ค่าคอมมิชชั่น/ค่าธรรมเนียม (บาท)</label>
+                    <input type="number" id="stockTxCommission" name="txCommission" placeholder="0.00" step="0.01" min="0" class="form-input w-full p-2 border rounded-md" value="0">
+                </div>
+                <div>
+                    <label for="stockTxGroup" class="block text-sm font-medium text-stone-700 mb-1">กลุ่ม (ถ้ามี)</label>
+                    <select id="stockTxGroup" name="txGroup" class="form-input w-full p-2 border rounded-md">
+                        <option value="">ไม่มีกลุ่ม</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="stockTxNotes" class="block text-sm font-medium text-stone-700 mb-1">หมายเหตุ</label>
+                    <textarea id="stockTxNotes" name="txNotes" rows="3" placeholder="รายละเอียดเพิ่มเติม..." class="form-input w-full p-2 border rounded-md"></textarea>
+                </div>
+                <input type="hidden" id="editingStockTransactionId" value="">
+                <div class="flex justify-end space-x-3">
+                    <button type="button" id="clearStockFormButton" class="px-4 py-2 rounded-md btn-secondary">ล้างฟอร์ม</button>
+                    <button type="submit" id="saveStockTransactionButton" class="px-6 py-2 rounded-md btn-primary">บันทึกรายการ</button>
+                </div>
+            </form>
+        </section>
+
+        <section id="add-dividend" class="content-section">
+            <h2 class="text-3xl font-semibold mb-6 text-sky-700">บันทึกเงินปันผล</h2>
+            <p class="mb-6 text-stone-600">กรอกรายละเอียดเงินปันผลที่คุณได้รับที่นี่ เงินปันผลจะถูกนำไปรวมในการคำนวณกำไร/ขาดทุนที่เกิดขึ้นแล้ว</p>
+            <form id="dividendTransactionForm" class="bg-white p-8 rounded-lg shadow space-y-6 max-w-2xl mx-auto">
+                <div>
+                    <label for="dividendTxDate" class="block text-sm font-medium text-stone-700 mb-1">วันที่ได้รับปันผล</label>
+                    <input type="date" id="dividendTxDate" name="txDate" class="form-input w-full p-2 border rounded-md" required>
+                </div>
+                <div>
+                    <label for="dividendTxTicker" class="block text-sm font-medium text-stone-700 mb-1">ชื่อย่อหลักทรัพย์ (Ticker)</label>
+                    <input type="text" id="dividendTxTicker" name="txTicker" placeholder="เช่น AOT, CPALL" class="form-input w-full p-2 border rounded-md" required>
+                </div>
+                <div>
+                    <label for="dividendTxAmount" class="block text-sm font-medium text-stone-700 mb-1">เงินปันผลที่ได้รับ (บาท)</label>
+                    <input type="number" id="dividendTxAmount" name="txDividend" placeholder="0.00" step="0.01" min="0" class="form-input w-full p-2 border rounded-md" required>
+                </div>
+                <div>
+                    <label for="dividendTxGroup" class="block text-sm font-medium text-stone-700 mb-1">กลุ่ม (ถ้ามี)</label>
+                    <select id="dividendTxGroup" name="txGroup" class="form-input w-full p-2 border rounded-md">
+                        <option value="">ไม่มีกลุ่ม</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="dividendTxNotes" class="block text-sm font-medium text-stone-700 mb-1">หมายเหตุ</label>
+                    <textarea id="dividendTxNotes" name="txNotes" rows="3" placeholder="รายละเอียดเพิ่มเติม..." class="form-input w-full p-2 border rounded-md"></textarea>
+                </div>
+                <input type="hidden" id="editingDividendTransactionId" value="">
+                <div class="flex justify-end space-x-3">
+                    <button type="button" id="clearDividendFormButton" class="px-4 py-2 rounded-md btn-secondary">ล้างฟอร์ม</button>
+                    <button type="submit" id="saveDividendTransactionButton" class="px-6 py-2 rounded-md btn-primary">บันทึกเงินปันผล</button>
+                </div>
+            </form>
+        </section>
+        <section id="transactions-log" class="content-section">
+            <h2 class="text-3xl font-semibold mb-6 text-sky-700">ประวัติรายการซื้อขายทั้งหมด</h2>
+            <p class="mb-6 text-stone-600">ตารางนี้แสดงประวัติการซื้อขายหุ้นทั้งหมดของคุณ คุณสามารถค้นหา กรอง และจัดการรายการต่างๆ ได้จากที่นี่ การคลิก "แก้ไข" จะนำข้อมูลรายการนั้นไปใส่ในฟอร์มบันทึกรายการเพื่อให้คุณปรับปรุงข้อมูลได้</p>
+            <div class="mb-4 flex space-x-2">
+                <input type="text" id="txLogSearch" placeholder="ค้นหาด้วยชื่อหุ้น..." class="form-input p-2 border rounded-md flex-grow">
+                <input type="month" id="txLogMonthFilter" class="form-input p-2 border rounded-md">
+                <button id="clearTxLogFilters" class="px-4 py-2 rounded-md btn-secondary">ล้างตัวกรอง</button>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow transaction-list-container">
+                <table class="min-w-full divide-y divide-stone-200">
+                    <thead class="bg-stone-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">วันที่</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">ชื่อหุ้น</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">ประเภท</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">จำนวน</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">ราคา</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">รวม</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">ปันผล</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">กลุ่ม</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">จัดการ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transactionsTableBody" class="bg-white divide-y divide-stone-200">
+                        </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="reports" class="content-section">
+            <h2 class="text-3xl font-semibold mb-6 text-sky-700">รายงานสรุป</h2>
+            <p class="mb-6 text-stone-600">ส่วนนี้แสดงรายงานและกราฟสรุปผลการลงทุนของคุณ เช่น สัดส่วนการลงทุนในแต่ละกลุ่ม, กำไร/ขาดทุนที่เกิดขึ้นแล้วตามช่วงเวลา และมูลค่าพอร์ตโฟลิโอที่เปลี่ยนแปลงไป คุณสามารถใช้ตัวกรองเพื่อดูข้อมูลเฉพาะช่วงเวลาที่สนใจได้</p>
+            <div class="mb-4">
+                <label for="reportPeriod" class="block text-sm font-medium text-stone-700 mb-1">เลือกช่วงเวลาสำหรับรายงาน:</label>
+                <select id="reportPeriod" class="form-input p-2 border rounded-md">
+                    <option value="all">ทั้งหมด</option>
+                    <option value="current_month">เดือนปัจจุบัน</option>
+                    <option value="last_month">เดือนที่แล้ว</option>
+                    <option value="current_year">ปีปัจจุบัน</option>
+                    <option value="last_year">ปีที่แล้ว</option>
+                </select>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold mb-4">สัดส่วนการลงทุนตามกลุ่ม</h3>
+                    <div class="chart-container">
+                        <canvas id="groupByPieChart"></canvas>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold mb-4">กำไร/ขาดทุนที่เกิดขึ้นแล้ว (รายหุ้น)</h3>
+                     <div class="chart-container">
+                        <canvas id="realizedPLByStockBarChart"></canvas>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow col-span-1 lg:col-span-2">
+                    <h3 class="text-xl font-semibold mb-4">กำไร/ขาดทุนที่เกิดขึ้นแล้ว (รายหุ้น)</h3>
+                    <div class="transaction-list-container">
+                        <table class="min-w-full divide-y divide-stone-200">
+                            <thead class="bg-stone-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">ชื่อหุ้น</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">จำนวน</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">ต้นทุนเฉลี่ย</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">ราคาขายเฉลี่ย</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">เงินปันผลที่ได้รับ</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">กำไร/ขาดทุนรวมปันผล</th>
+                                </tr>
+                            </thead>
+                            <tbody id="realizedPLByStockTableBody" class="bg-white divide-y divide-stone-200">
+                                </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow col-span-1 lg:col-span-2">
+                    <h3 class="text-xl font-semibold mb-4">กำไร/ขาดทุนที่ยังไม่เกิดขึ้น (รายหุ้น)</h3>
+                    <div class="transaction-list-container">
+                        <table class="min-w-full divide-y divide-stone-200">
+                            <thead class="bg-stone-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">ชื่อหุ้น</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">จำนวน</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">ต้นทุนเฉลี่ย</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">ราคาตลาด</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">เงินปันผลที่ได้รับ</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">กำไร/ขาดทุนรวมปันผล</th>
+                                </tr>
+                            </thead>
+                            <tbody id="unrealizedPLByStockTableBody" class="bg-white divide-y divide-stone-200">
+                                </tbody>
+                        </table>
+                    </div>
+                </div>
+                <!-- Removed: New: Combined Unrealized P/L + Dividends by Stock (merged into existing) -->
+                <!-- Removed: New: Combined Realized Capital P/L + Dividends by Stock (merged into existing) -->
+
+                <div class="bg-white p-6 rounded-lg shadow col-span-1 lg:col-span-2">
+                    <h3 class="text-xl font-semibold mb-4">มูลค่าพอร์ตโฟลิโอตามช่วงเวลา (จำลอง)</h3>
+                    <div class="chart-container" style="max-width: 900px;">
+                        <canvas id="portfolioValueLineChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="settings" class="content-section">
+            <h2 class="text-3xl font-semibold mb-6 text-sky-700">ตั้งค่า</h2>
+            <p class="mb-6 text-stone-600">คุณสามารถจัดการกลุ่มของรายการซื้อขายและอัปเดตราคาตลาดปัจจุบันของหุ้นที่ถือครองได้ที่นี่ การกำหนดกลุ่มจะช่วยให้คุณวิเคราะห์ผลการลงทุนได้ละเอียดขึ้น และการอัปเดตราคาตลาดจะช่วยให้การคำนวณกำไร/ขาดทุนที่ยังไม่เกิดขึ้นมีความแม่นยำ</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-white p-8 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold mb-4">จัดการกลุ่มรายการ</h3>
+                    <form id="groupForm" class="space-y-4 mb-6">
+                        <div>
+                            <label for="groupName" class="block text-sm font-medium text-stone-700 mb-1">ชื่อกลุ่มใหม่</label>
+                            <input type="text" id="groupName" placeholder="เช่น หุ้นเติบโต, ปันผล" class="form-input w-full p-2 border rounded-md">
+                        </div>
+                        <button type="submit" class="px-4 py-2 rounded-md btn-primary">เพิ่มกลุ่ม</button>
+                    </form>
+                    <h4 class="text-lg font-medium mb-2">กลุ่มที่มีอยู่:</h4>
+                    <ul id="groupsList" class="space-y-2 list-disc list-inside">
+                        <li class="text-stone-500">ยังไม่มีกลุ่มที่สร้าง</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-8 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold mb-4">อัปเดตราคาตลาดปัจจุบัน</h3>
+                    <p class="text-sm text-stone-500 mb-4">ใส่ราคาตลาดล่าสุดของหุ้นที่คุณถือครองเพื่อคำนวณกำไร/ขาดทุนที่ยังไม่เกิดขึ้นได้แม่นยำยิ่งขึ้น</p>
+                    <form id="marketPriceForm" class="space-y-4">
+                        <div id="marketPriceInputsContainer" class="space-y-3">
+                            <p class="text-stone-500">ไม่มีหุ้นในพอร์ตเพื่ออัปเดตราคา</p>
+                        </div>
+                        <button type="submit" class="px-4 py-2 rounded-md btn-primary">บันทึกราคาตลาด</button>
+                    </form>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="confirmationModal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close-button" id="closeModalButton">&times;</span>
+            <p id="modalMessageText" class="text-lg mb-4">คุณแน่ใจหรือไม่?</p>
+            <div class="flex justify-end space-x-3">
+                <button id="modalCancelButton" class="px-4 py-2 rounded-md btn-secondary">ยกเลิก</button>
+                <button id="modalConfirmButton" class="px-4 py-2 rounded-md btn-danger">ยืนยัน</button>
+            </div>
+        </div>
+    </div>
+    <div id="notificationToast" class="fixed bottom-5 right-5 bg-sky-600 text-white px-6 py-3 rounded-lg shadow-md transition-opacity duration-300 opacity-0">
+        <p id="notificationMessage"></p>
+    </div>
+
+<script>
+    // Global state
+    let transactions = [];
+    let settings = {
+        groups: [],
+        marketPrices: {},
+        nextTransactionId: 1, // เริ่มต้น ID รายการ
+        nextGroupId: 1 // เริ่มต้น ID กลุ่ม
+    };
+
+    // Chart instances
+    let portfolioPieChartInstance = null;
+    let groupByPieChartInstance = null;
+    let realizedPLByStockBarChartInstance = null; // Renamed from realizedPLByGroupBarChartInstance
+    let portfolioValueLineChartInstance = null;
+
+    // DOM Elements
+    const sections = document.querySelectorAll('.content-section');
+    const navLinks = document.querySelectorAll('.sidebar-link');
+    
+    // Stock Transaction Form Elements
+    const stockTransactionForm = document.getElementById('stockTransactionForm');
+    const stockTxDateInput = document.getElementById('stockTxDate');
+    const stockTxTickerInput = document.getElementById('stockTxTicker');
+    const stockTxTypeSelect = document.getElementById('stockTxType');
+    const stockTxQuantityInput = document.getElementById('stockTxQuantity');
+    const stockTxPriceInput = document.getElementById('stockTxPrice');
+    const stockTxCommissionInput = document.getElementById('stockTxCommission');
+    const stockTxGroupSelect = document.getElementById('stockTxGroup');
+    const stockTxNotesInput = document.getElementById('stockTxNotes');
+    const editingStockTransactionIdInput = document.getElementById('editingStockTransactionId');
+    const saveStockTransactionButton = document.getElementById('saveStockTransactionButton');
+    const clearStockFormButton = document.getElementById('clearStockFormButton');
+
+    // Dividend Transaction Form Elements
+    const dividendTransactionForm = document.getElementById('dividendTransactionForm');
+    const dividendTxDateInput = document.getElementById('dividendTxDate');
+    const dividendTxTickerInput = document.getElementById('dividendTxTicker');
+    const dividendTxAmountInput = document.getElementById('dividendTxAmount');
+    const dividendTxGroupSelect = document.getElementById('dividendTxGroup');
+    const dividendTxNotesInput = document.getElementById('dividendTxNotes');
+    const editingDividendTransactionIdInput = document.getElementById('editingDividendTransactionId');
+    const saveDividendTransactionButton = document.getElementById('saveDividendTransactionButton');
+    const clearDividendFormButton = document.getElementById('clearDividendFormButton');
+
+
+    const transactionsTableBody = document.getElementById('transactionsTableBody');
+    const groupsList = document.getElementById('groupsList');
+    const groupForm = document.getElementById('groupForm');
+    const portfolioHoldingsDiv = document.getElementById('portfolioHoldings');
+    const totalPortfolioValueEl = document.getElementById('totalPortfolioValue');
+    const totalPortfolioCostEl = document.getElementById('totalPortfolioCost');
+    const totalUnrealizedPLEl = document.getElementById('totalUnrealizedPL');
+    const totalRealizedCapitalPLEl = document.getElementById('totalRealizedCapitalPLEl'); // New element for realized P/L excluding dividends
+    const totalRealizedPLEl = document.getElementById('totalRealizedPL'); // This now explicitly means realized P/L including dividends
+    const totalDividendsReceivedEl = document.getElementById('totalDividendsReceivedEl'); 
+    const totalPortfolioPLWithDividendsEl = document.getElementById('totalPortfolioPLWithDividendsEl'); // This now explicitly means total P/L including dividends and unrealized
+    const marketPriceForm = document.getElementById('marketPriceForm');
+    const marketPriceInputsContainer = document.getElementById('marketPriceInputsContainer');
+    const txLogSearchInput = document.getElementById('txLogSearch');
+    const txLogMonthFilterInput = document.getElementById('txLogMonthFilter');
+    const clearTxLogFiltersButton = document.getElementById('clearTxLogFilters');
+    const reportPeriodSelect = document.getElementById('reportPeriod');
+    const realizedPLByStockTableBody = document.getElementById('realizedPLByStockTableBody'); 
+    const unrealizedPLByStockTableBody = document.getElementById('unrealizedPLByStockTableBody');
+    // Removed: const unrealizedPLWithDividendsByStockTableBody = document.getElementById('unrealizedPLWithDividendsByStockTableBody'); // New table body
+    // Removed: const realizedPLWithDividendsByStockTableBody = document.getElementById('realizedPLWithDividendsByStockTableBody'); // New table body
+    const confirmationModal = document.getElementById('confirmationModal');
+    const closeModalButton = document.getElementById('closeModalButton');
+    const modalMessageText = document.getElementById('modalMessageText');
+    const modalConfirmButton = document.getElementById('modalConfirmButton');
+    const modalCancelButton = document.getElementById('modalCancelButton');
+    let confirmAction = null;
+    const notificationToast = document.getElementById('notificationToast');
+    const notificationMessage = document.getElementById('notificationMessage');
+
+
+    // Utility Functions
+    const formatCurrency = (amount) => {
+        return new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' }).format(amount);
+    };
+
+    const showNotification = (message, duration = 3000) => {
+        notificationMessage.textContent = message;
+        notificationToast.classList.remove('opacity-0');
+        notificationToast.classList.add('opacity-100');
+        setTimeout(() => {
+            notificationToast.classList.remove('opacity-100');
+            notificationToast.classList.add('opacity-0');
+        }, duration);
+    };
+
+    const showModal = (message, onConfirm) => {
+        modalMessageText.textContent = message;
+        confirmAction = onConfirm;
+        confirmationModal.style.display = "block";
+    };
+
+    const hideModal = () => {
+        confirmationModal.style.display = "none";
+        confirmAction = null;
+    };
+
+    // ** Local Storage Functions **
+    const saveData = () => {
+        localStorage.setItem('stockLogTransactions', JSON.stringify(transactions));
+        localStorage.setItem('stockLogSettings', JSON.stringify(settings));
+        console.log('Data saved to Local Storage.');
+    };
+
+    const loadData = () => {
+        const storedTransactions = localStorage.getItem('stockLogTransactions');
+        const storedSettings = localStorage.getItem('stockLogSettings');
+
+        if (storedTransactions) {
+            transactions = JSON.parse(storedTransactions);
+            // Ensure all transactions have a 'dividend' property, default to 0 if missing
+            transactions = transactions.map(tx => ({ ...tx, dividend: tx.dividend || 0 }));
+            // ตรวจสอบและกำหนด nextTransactionId ให้ถูกต้อง
+            if (transactions.length > 0) {
+                settings.nextTransactionId = Math.max(...transactions.map(tx => tx.id)) + 1;
+            } else {
+                settings.nextTransactionId = 1;
+            }
+        } else {
+            transactions = [];
+            settings.nextTransactionId = 1;
+        }
+
+        if (storedSettings) {
+            const loadedSettings = JSON.parse(storedSettings);
+            Object.assign(settings, loadedSettings);
+            // ตรวจสอบและกำหนด nextGroupId ให้ถูกต้อง
+            if (settings.groups && settings.groups.length > 0) {
+                settings.nextGroupId = Math.max(...settings.groups.map(g => g.id)) + 1;
+            } else {
+                settings.nextGroupId = 1;
+            }
+            if (!settings.marketPrices) settings.marketPrices = {}; // ตรวจสอบให้แน่ใจว่ามี marketPrices
+        } else {
+            settings.groups = [];
+            settings.marketPrices = {};
+            settings.nextGroupId = 1;
+        }
+        console.log('Data loaded from Local Storage.');
+    };
+
+    // Navigation Logic
+    const setActiveSection = (sectionId) => {
+        sections.forEach(section => {
+            section.classList.toggle('active', section.id === sectionId);
+        });
+        navLinks.forEach(link => {
+            link.classList.toggle('active', link.dataset.section === sectionId);
+        });
+        // Refresh views when section changes
+        refreshAllViews();
+    };
+
+    navLinks.forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            setActiveSection(link.dataset.section);
+        });
+    });
+
+    // Stock Transaction Logic
+    stockTransactionForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const formData = new FormData(stockTransactionForm);
+        const editingId = editingStockTransactionIdInput.value;
+
+        let transactionData = {
+            date: formData.get('txDate'),
+            ticker: formData.get('txTicker').toUpperCase(),
+            type: formData.get('txType'), // 'buy' or 'sell'
+            quantity: parseFloat(formData.get('txQuantity')),
+            price: parseFloat(formData.get('txPrice')),
+            commission: parseFloat(formData.get('txCommission') || 0),
+            groupId: formData.get('txGroup') ? parseInt(formData.get('txGroup')) : null,
+            notes: formData.get('txNotes'),
+            dividend: 0 // Stock transactions have 0 dividend
+        };
+
+        if (isNaN(transactionData.quantity) || transactionData.quantity <= 0 || isNaN(transactionData.price) || transactionData.price <= 0) {
+            showNotification('กรุณากรอกจำนวนหุ้นและราคาที่ถูกต้อง', 3000);
+            return;
+        }
+
+        if (editingId) {
+            const index = transactions.findIndex(tx => tx.id == editingId);
+            if (index !== -1) {
+                transactions[index] = { ...transactions[index], ...transactionData, id: parseInt(editingId) };
+                showNotification('แก้ไขรายการสำเร็จแล้ว');
+            }
+        } else {
+            transactionData.id = settings.nextTransactionId++;
+            transactions.push(transactionData);
+            showNotification('บันทึกรายการสำเร็จแล้ว');
+        }
+        
+        saveData();
+        stockTransactionForm.reset();
+        editingStockTransactionIdInput.value = '';
+        saveStockTransactionButton.textContent = 'บันทึกรายการ';
+        saveStockTransactionButton.classList.replace('btn-secondary', 'btn-primary');
+        stockTxTypeSelect.value = 'buy'; // Reset type to buy
+
+        setActiveSection('transactions-log');
+    });
+
+    clearStockFormButton.addEventListener('click', () => {
+        stockTransactionForm.reset();
+        editingStockTransactionIdInput.value = '';
+        saveStockTransactionButton.textContent = 'บันทึกรายการ';
+        saveStockTransactionButton.classList.replace('btn-secondary', 'btn-primary');
+        stockTxTypeSelect.value = 'buy'; // Reset type to buy
+    });
+
+    // Dividend Transaction Logic
+    dividendTransactionForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const formData = new FormData(dividendTransactionForm);
+        const editingId = editingDividendTransactionIdInput.value;
+
+        let transactionData = {
+            date: formData.get('txDate'),
+            ticker: formData.get('txTicker').toUpperCase(),
+            type: 'dividend', // Fixed type for dividend form
+            quantity: 0,
+            price: 0,
+            commission: 0,
+            dividend: parseFloat(formData.get('txDividend') || 0),
+            groupId: formData.get('txGroup') ? parseInt(formData.get('txGroup')) : null,
+            notes: formData.get('txNotes')
+        };
+
+        if (isNaN(transactionData.dividend) || transactionData.dividend <= 0) {
+            showNotification('กรุณากรอกจำนวนเงินปันผลที่ถูกต้อง', 3000);
+            return;
+        }
+
+        if (editingId) {
+            const index = transactions.findIndex(tx => tx.id == editingId);
+            if (index !== -1) {
+                transactions[index] = { ...transactions[index], ...transactionData, id: parseInt(editingId) };
+                showNotification('แก้ไขรายการสำเร็จแล้ว');
+            }
+        } else {
+            transactionData.id = settings.nextTransactionId++;
+            transactions.push(transactionData);
+            showNotification('บันทึกเงินปันผลสำเร็จแล้ว');
+        }
+        
+        saveData();
+        dividendTransactionForm.reset();
+        editingDividendTransactionIdInput.value = '';
+        saveDividendTransactionButton.textContent = 'บันทึกเงินปันผล';
+        saveDividendTransactionButton.classList.replace('btn-secondary', 'btn-primary');
+
+        setActiveSection('transactions-log');
+    });
+
+    clearDividendFormButton.addEventListener('click', () => {
+        dividendTransactionForm.reset();
+        editingDividendTransactionIdInput.value = '';
+        saveDividendTransactionButton.textContent = 'บันทึกเงินปันผล';
+        saveDividendTransactionButton.classList.replace('btn-secondary', 'btn-primary');
+    });
+
+
+    // Populate Form for Editing (Unified)
+    const populateTransactionForm = (txId) => {
+        const tx = transactions.find(t => t.id == txId);
+        if (tx) {
+            if (tx.type === 'dividend') {
+                // Populate Dividend Form
+                dividendTxDateInput.value = tx.date;
+                dividendTxTickerInput.value = tx.ticker;
+                dividendTxAmountInput.value = tx.dividend;
+                dividendTxGroupSelect.value = tx.groupId || '';
+                dividendTxNotesInput.value = tx.notes;
+                editingDividendTransactionIdInput.value = tx.id;
+                saveDividendTransactionButton.textContent = 'บันทึกการแก้ไข';
+                saveDividendTransactionButton.classList.replace('btn-primary', 'btn-secondary');
+                setActiveSection('add-dividend'); // Switch to dividend section
+            } else { // buy or sell
+                // Populate Stock Transaction Form
+                stockTxDateInput.value = tx.date;
+                stockTxTickerInput.value = tx.ticker;
+                stockTxTypeSelect.value = tx.type;
+                stockTxQuantityInput.value = tx.quantity;
+                stockTxPriceInput.value = tx.price;
+                stockTxCommissionInput.value = tx.commission;
+                stockTxGroupSelect.value = tx.groupId || '';
+                stockTxNotesInput.value = tx.notes;
+                editingStockTransactionIdInput.value = tx.id;
+                saveStockTransactionButton.textContent = 'บันทึกการแก้ไข';
+                saveStockTransactionButton.classList.replace('btn-primary', 'btn-secondary');
+                setActiveSection('add-transaction'); // Switch to stock transaction section
+            }
+        }
+    };
+
+    const deleteTransaction = (txId) => {
+        showModal(`คุณแน่ใจหรือไม่ว่าต้องการลบรายการนี้ (ID: ${txId})? การกระทำนี้ไม่สามารถย้อนกลับได้`, () => {
+            transactions = transactions.filter(tx => tx.id != txId);
+            saveData();
+            hideModal();
+            showNotification('ลบรายการสำเร็จแล้ว');
+            refreshAllViews();
+        });
+    };
+
+
+    // Group Logic
+    const renderGroups = () => {
+        // For Stock Transaction Form
+        stockTxGroupSelect.innerHTML = '<option value="">ไม่มีกลุ่ม</option>';
+        // For Dividend Transaction Form
+        dividendTxGroupSelect.innerHTML = '<option value="">ไม่มีกลุ่ม</option>';
+
+        groupsList.innerHTML = '';
+        
+        if (settings.groups.length === 0) {
+            groupsList.innerHTML = '<li class="text-stone-500">ยังไม่มีกลุ่มที่สร้าง</li>';
+        } else {
+            settings.groups.forEach(group => {
+                const li = document.createElement('li');
+                li.className = 'flex justify-between items-center py-1';
+                li.textContent = group.name;
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.textContent = 'ลบ';
+                deleteBtn.className = 'ml-2 px-2 py-1 text-xs rounded btn-danger text-white';
+                deleteBtn.onclick = () => deleteGroup(group.id);
+                li.appendChild(deleteBtn);
+                groupsList.appendChild(li);
+
+                const optionStock = document.createElement('option');
+                optionStock.value = group.id;
+                optionStock.textContent = group.name;
+                stockTxGroupSelect.appendChild(optionStock);
+
+                const optionDividend = document.createElement('option');
+                optionDividend.value = group.id;
+                optionDividend.textContent = group.name;
+                dividendTxGroupSelect.appendChild(optionDividend);
+            });
+        }
+    };
+
+    groupForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const groupNameInput = document.getElementById('groupName');
+        const groupName = groupNameInput.value.trim();
+        if (groupName && !settings.groups.some(g => g.name === groupName)) {
+            settings.groups.push({ id: settings.nextGroupId++, name: groupName });
+            groupNameInput.value = '';
+            saveData();
+            showNotification('เพิ่มกลุ่มสำเร็จแล้ว');
+            renderGroups();
+        } else if (settings.groups.some(g => g.name === groupName)) {
+            showNotification('ชื่อกลุ่มนี้มีอยู่แล้ว', 3000);
+        }
+    });
+
+    const deleteGroup = (groupId) => {
+         showModal(`คุณแน่ใจหรือไม่ว่าต้องการลบกลุ่มนี้? รายการที่เคยใช้กลุ่มนี้จะถูกเปลี่ยนเป็น "ไม่มีกลุ่ม"`, () => {
+            settings.groups = settings.groups.filter(g => g.id !== groupId);
+            // อัปเดต transactions ที่เคยใช้ group นี้ให้เป็น null
+            transactions.forEach(tx => {
+                if (tx.groupId === groupId) {
+                    tx.groupId = null;
+                }
+            });
+            saveData();
+            hideModal();
+            showNotification('ลบกลุ่มสำเร็จแล้ว');
+            refreshAllViews();
+        });
+    };
+
+    // Market Price Logic
+    const renderMarketPriceInputs = () => {
+        marketPriceInputsContainer.innerHTML = '';
+        const currentHoldings = calculatePortfolio().holdings;
+        const heldTickers = Object.keys(currentHoldings);
+
+        if (heldTickers.length === 0) {
+            marketPriceInputsContainer.innerHTML = '<p class="text-stone-500">ไม่มีหุ้นในพอร์ตเพื่ออัปเดตราคา</p>';
+            return;
+        }
+
+        heldTickers.forEach(ticker => {
+            const div = document.createElement('div');
+            div.className = 'flex items-center space-x-2';
+            const label = document.createElement('label');
+            label.htmlFor = `price-${ticker}`;
+            label.textContent = `${ticker}:`;
+            label.className = 'w-20 text-sm font-medium text-stone-700';
+            
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.id = `price-${ticker}`;
+            input.name = `price-${ticker}`;
+            input.step = '0.01';
+            input.min = '0';
+            input.placeholder = 'ราคาตลาดปัจจุบัน';
+            input.className = 'form-input p-2 border rounded-md w-full';
+            input.value = settings.marketPrices[ticker] || '';
+            
+            div.appendChild(label);
+            div.appendChild(input);
+            marketPriceInputsContainer.appendChild(div);
+        });
+    };
+
+    marketPriceForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const inputs = marketPriceInputsContainer.querySelectorAll('input[type="number"]');
+        inputs.forEach(input => {
+            const ticker = input.name.split('-')[1];
+            const price = parseFloat(input.value);
+            if (ticker && !isNaN(price) && price >= 0) {
+                settings.marketPrices[ticker] = price;
+            } else if (ticker && input.value === '') {
+                 delete settings.marketPrices[ticker];
+            }
+        });
+        saveData();
+        showNotification('อัปเดตราคาตลาดสำเร็จแล้ว');
+        refreshAllViews();
+    });
+
+
+    // Portfolio Calculation & Display
+    const calculatePortfolio = () => {
+        const portfolio = {}; // ticker: { quantity, totalCost, avgPrice, marketValue, unrealizedPL, sharesBoughtData }
+        const realizedTrades = []; // { ticker, realizedPL, sellDate, groupId, isDividend }
+        let totalCurrentPortfolioCost = 0; // Initialize total current portfolio cost
+        let totalDividends = 0; // Initialize total dividends
+
+        // New aggregation for realized data per ticker
+        const realizedStockData = {}; // ticker: { totalSoldQuantity, totalCostOfSoldShares, totalSellingValue, totalCapitalPL, totalDividends }
+
+        const sortedTransactions = [...transactions].sort((a,b) => new Date(a.date) - new Date(b.date));
+
+        sortedTransactions.forEach(tx => {
+            if (tx.type === 'dividend') {
+                totalDividends += tx.dividend; // Accumulate total dividends
+                // Add dividend as a realized trade for reporting purposes
+                realizedTrades.push({
+                    ticker: tx.ticker,
+                    realizedPL: tx.dividend, // Dividend is a realized gain
+                    sellDate: tx.date, // Use tx.date for dividends as sellDate
+                    groupId: tx.groupId,
+                    isDividend: true // Flag to distinguish from capital gains
+                });
+                // Aggregate dividends per ticker
+                if (!realizedStockData[tx.ticker]) realizedStockData[tx.ticker] = { totalSoldQuantity: 0, totalCostOfSoldShares: 0, totalSellingValue: 0, totalCapitalPL: 0, totalDividends: 0 };
+                realizedStockData[tx.ticker].totalDividends += tx.dividend;
+                return; // Skip further processing for dividend transactions
+            }
+
+            // For buy/sell transactions
+            if (!portfolio[tx.ticker]) {
+                portfolio[tx.ticker] = { quantity: 0, totalCost: 0, avgPrice: 0, sharesBoughtData: [] };
+            }
+            const stock = portfolio[tx.ticker];
+            const transactionValue = tx.quantity * tx.price + tx.commission;
+
+            if (tx.type === 'buy') {
+                stock.quantity += tx.quantity;
+                stock.totalCost += transactionValue;
+                stock.avgPrice = stock.quantity > 0 ? stock.totalCost / stock.quantity : 0;
+                stock.sharesBoughtData.push({ quantity: tx.quantity, price: tx.price, cost: transactionValue, date: tx.date });
+
+            } else if (tx.type === 'sell') {
+                let quantityToSell = tx.quantity;
+                let costOfSoldShares = 0;
+
+                // FIFO for calculating cost of sold shares
+                while (quantityToSell > 0 && stock.sharesBoughtData.length > 0) {
+                    const oldestLot = stock.sharesBoughtData[0];
+                    const sellFromLot = Math.min(quantityToSell, oldestLot.quantity);
+                    
+                    costOfSoldShares += (oldestLot.cost / oldestLot.quantity) * sellFromLot;
+                    
+                    oldestLot.quantity -= sellFromLot;
+                    quantityToSell -= sellFromLot;
+
+                    if (oldestLot.quantity === 0) {
+                        stock.sharesBoughtData.shift();
+                    }
+                }
+                
+                const sellValue = tx.quantity * tx.price - tx.commission;
+                const realizedCapitalPL = sellValue - costOfSoldShares; // Capital gain/loss from sale
+                
+                realizedTrades.push({
+                    ticker: tx.ticker,
+                    realizedPL: realizedCapitalPL, // This is capital gain/loss only
+                    sellDate: tx.date,
+                    groupId: tx.groupId,
+                    isDividend: false
+                });
+
+                // Aggregate realized capital gains data per ticker
+                if (!realizedStockData[tx.ticker]) realizedStockData[tx.ticker] = { totalSoldQuantity: 0, totalCostOfSoldShares: 0, totalSellingValue: 0, totalCapitalPL: 0, totalDividends: 0 };
+                realizedStockData[tx.ticker].totalSoldQuantity += tx.quantity;
+                realizedStockData[tx.ticker].totalCostOfSoldShares += costOfSoldShares;
+                realizedStockData[tx.ticker].totalSellingValue += sellValue;
+                realizedStockData[tx.ticker].totalCapitalPL += realizedCapitalPL;
+
+
+                stock.quantity -= tx.quantity;
+                stock.totalCost -= costOfSoldShares; // Adjust totalCost based on FIFO cost of shares sold
+                 if (stock.quantity > 0) {
+                    stock.avgPrice = stock.totalCost / stock.quantity;
+                } else { // Sold all shares
+                    stock.avgPrice = 0;
+                    stock.totalCost = 0; // Reset total cost if all shares are sold
+                }
+
+            }
+        });
+        
+        let totalPortfolioMarketValue = 0;
+        let totalPortfolioUnrealizedPL = 0;
+
+        const currentHoldings = {}; // This will hold ticker: { quantity, totalCost, avgPrice, marketValue, unrealizedPL }
+        Object.keys(portfolio).forEach(ticker => {
+            const stock = portfolio[ticker];
+            if (stock.quantity > 0) { // Only include stocks currently held
+                const marketPrice = settings.marketPrices[ticker] || stock.avgPrice; // Use avgPrice if market price not set
+                stock.marketValue = stock.quantity * marketPrice;
+                stock.unrealizedPL = stock.marketValue - stock.totalCost;
+                totalPortfolioMarketValue += stock.marketValue;
+                totalPortfolioUnrealizedPL += stock.unrealizedPL;
+                totalCurrentPortfolioCost += stock.totalCost; // Accumulate total cost of currently held stocks
+                currentHoldings[ticker] = { ...stock };
+            }
+        });
+        
+        // Total Realized PL from Capital Gains only (excluding dividends)
+        const totalRealizedCapitalPL = Object.values(realizedStockData).reduce((sum, data) => sum + data.totalCapitalPL, 0);
+        
+        // Total Realized PL including dividends
+        const totalRealizedPLWithDividends = totalRealizedCapitalPL + totalDividends;
+
+        // Total Portfolio P/L (Unrealized + Realized Capital Gains + Total Dividends)
+        const totalPortfolioPLWithDividendsAndUnrealized = totalPortfolioUnrealizedPL + totalRealizedPLWithDividends;
+
+
+        return { 
+            holdings: currentHoldings, 
+            totalMarketValue: totalPortfolioMarketValue, 
+            totalUnrealizedPL: totalPortfolioUnrealizedPL,
+            realizedTrades: realizedTrades, // Keep for other reports if needed
+            totalRealizedCapitalPL: totalRealizedCapitalPL, // Capital gains/losses from sales ONLY
+            totalRealizedPL: totalRealizedPLWithDividends, // Realized P/L including dividends
+            totalCurrentPortfolioCost: totalCurrentPortfolioCost,
+            totalDividendsReceived: totalDividends, // Total dividends received
+            totalPortfolioPLWithDividends: totalPortfolioPLWithDividendsAndUnrealized, // Total P/L (Unrealized + Realized Capital + Dividends)
+            realizedCapitalPLByTicker: realizedStockData, // This now holds all detailed realized data
+            dividendsByTicker: realizedStockData // This will be merged into realizedCapitalPLByTicker for combined view
+        };
+    };
+    
+    const renderPortfolio = () => {
+        const portfolioData = calculatePortfolio();
+        portfolioHoldingsDiv.innerHTML = '';
+
+        if (Object.keys(portfolioData.holdings).length === 0) {
+            portfolioHoldingsDiv.innerHTML = '<p class="text-stone-500">ไม่มีหุ้นในพอร์ต</p>';
+        } else {
+            Object.entries(portfolioData.holdings).forEach(([ticker, stock]) => {
+                const div = document.createElement('div');
+                div.className = 'p-3 border border-stone-200 rounded-md bg-stone-50';
+                const unrealizedPLClass = stock.unrealizedPL >= 0 ? 'text-green-600' : 'text-red-600';
+                
+                div.innerHTML = `
+                    <div class="flex justify-between items-center mb-1">
+                        <h4 class="text-lg font-semibold text-sky-700">${ticker}</h4>
+                        <span class="text-sm font-medium ${unrealizedPLClass}">${formatCurrency(stock.unrealizedPL)} (${((stock.unrealizedPL / stock.totalCost) * 100 || 0).toFixed(2)}%)</span>
+                    </div>
+                    <p class="text-xs text-stone-500">จำนวน: ${stock.quantity.toLocaleString()} หุ้น @ ${formatCurrency(stock.avgPrice)} (ต้นทุน)</p>
+                    <p class="text-xs text-stone-500">มูลค่าตลาด: ${formatCurrency(stock.marketValue)} (ราคาตลาด: ${formatCurrency(settings.marketPrices[ticker] || stock.avgPrice)})</p>
+                `;
+                portfolioHoldingsDiv.appendChild(div);
+            });
+        }
+
+        totalPortfolioValueEl.textContent = formatCurrency(portfolioData.totalMarketValue);
+        totalPortfolioCostEl.textContent = formatCurrency(portfolioData.totalCurrentPortfolioCost); // Display total portfolio cost
+        
+        totalUnrealizedPLEl.textContent = formatCurrency(portfolioData.totalUnrealizedPL);
+        totalUnrealizedPLEl.className = `text-3xl font-bold ${portfolioData.totalUnrealizedPL >= 0 ? 'text-green-600' : 'text-red-600'}`;
+        
+        totalRealizedCapitalPLEl.textContent = formatCurrency(portfolioData.totalRealizedCapitalPL); // New: Display realized P/L excluding dividends
+        totalRealizedCapitalPLEl.className = `text-3xl font-bold ${portfolioData.totalRealizedCapitalPL >= 0 ? 'text-green-600' : 'text-red-600'}`;
+
+        totalDividendsReceivedEl.textContent = formatCurrency(portfolioData.totalDividendsReceived);
+        totalDividendsReceivedEl.className = `text-3xl font-bold ${portfolioData.totalDividendsReceived >= 0 ? 'text-green-600' : 'text-red-600'}`;
+
+        totalRealizedPLEl.textContent = formatCurrency(portfolioData.totalRealizedPL); // This now explicitly means realized P/L including dividends
+        totalRealizedPLEl.className = `text-3xl font-bold ${portfolioData.totalRealizedPL >= 0 ? 'text-green-600' : 'text-red-600'}`;
+        
+        totalPortfolioPLWithDividendsEl.textContent = formatCurrency(portfolioData.totalPortfolioPLWithDividends); // This now explicitly means total P/L including dividends and unrealized
+        totalPortfolioPLWithDividendsEl.className = `text-3xl font-bold ${portfolioData.totalPortfolioPLWithDividends >= 0 ? 'text-green-600' : 'text-red-600'}`;
+
+
+        renderPortfolioPieChart(portfolioData.holdings);
+        renderMarketPriceInputs(); // Keep market price inputs updated
+    };
+
+    // Transaction Log Display
+    const renderTransactionsLog = (filteredTx = transactions) => {
+        transactionsTableBody.innerHTML = '';
+        const sortedTx = [...filteredTx].sort((a,b) => new Date(b.date) - new Date(b.date)); // Sort by date, newest first
+
+        if (sortedTx.length === 0) {
+            transactionsTableBody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-stone-500">ไม่มีรายการ</td></tr>';
+            return;
+        }
+
+        sortedTx.forEach(tx => {
+            const row = transactionsTableBody.insertRow();
+            const groupName = tx.groupId ? (settings.groups.find(g => g.id === tx.groupId) || {name: 'N/A'}).name : '-';
+            
+            let displayQuantity = tx.quantity > 0 ? tx.quantity.toLocaleString() : '-';
+            let displayPrice = tx.price > 0 ? formatCurrency(tx.price) : '-';
+            let displayTotalValue = '-';
+            if (tx.type === 'buy') {
+                displayTotalValue = formatCurrency((tx.quantity * tx.price) + tx.commission);
+            } else if (tx.type === 'sell') {
+                displayTotalValue = formatCurrency((tx.quantity * tx.price) - tx.commission);
+            }
+
+            let displayDividend = tx.dividend > 0 ? formatCurrency(tx.dividend) : '-';
+
+            row.innerHTML = `
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${tx.date}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-sky-700">${tx.ticker}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm ${tx.type === 'buy' ? 'text-green-600' : (tx.type === 'sell' ? 'text-red-600' : 'text-blue-600')}">${tx.type === 'buy' ? 'ซื้อ' : (tx.type === 'sell' ? 'ขาย' : 'ปันผล')}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${displayQuantity}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${displayPrice}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${displayTotalValue}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${displayDividend}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${groupName}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm space-x-2">
+                    <button onclick="populateTransactionForm(${tx.id})" class="text-sky-600 hover:text-sky-800">แก้ไข</button>
+                    <button onclick="deleteTransaction(${tx.id})" class="text-red-600 hover:text-red-800">ลบ</button>
+                </td>
+            `;
+        });
+    };
+    
+    const filterTransactions = () => {
+        const searchTerm = txLogSearchInput.value.toLowerCase();
+        const monthTerm = txLogMonthFilterInput.value; //YYYY-MM
+
+        let filtered = transactions.filter(tx => {
+            const tickerMatch = tx.ticker.toLowerCase().includes(searchTerm);
+            const dateMatch = monthTerm ? tx.date.startsWith(monthTerm) : true;
+            return tickerMatch && dateMatch;
+        });
+        renderTransactionsLog(filtered);
+    };
+
+    txLogSearchInput.addEventListener('input', filterTransactions);
+    txLogMonthFilterInput.addEventListener('input', filterTransactions);
+    clearTxLogFiltersButton.addEventListener('click', () => {
+        txLogSearchInput.value = '';
+        txLogMonthFilterInput.value = '';
+        renderTransactionsLog();
+    });
+
+    // Report Filtering and Rendering
+    const getFilteredTransactionsForReport = () => {
+        const period = reportPeriodSelect.value;
+        const now = new Date();
+        let startDate, endDate;
+
+        switch(period) {
+            case 'current_month':
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                break;
+            case 'last_month':
+                startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                endDate = new Date(now.getFullYear(), now.getMonth(), 0);
+                break;
+            case 'current_year':
+                startDate = new Date(now.getFullYear(), 0, 1);
+                endDate = new Date(now.getFullYear(), 11, 31);
+                break;
+            case 'last_year':
+                startDate = new Date(now.getFullYear() - 1, 0, 1);
+                endDate = new Date(now.getFullYear() - 1, 11, 31);
+                break;
+            case 'all':
+            default:
+                return transactions; // All transactions
+        }
+        
+        // Format dates for comparison with transaction.date (YYYY-MM-DD)
+        const formatDate = (date) => date.toISOString().split('T')[0];
+        const strStartDate = formatDate(startDate);
+        const strEndDate = formatDate(endDate);
+
+        return transactions.filter(tx => tx.date >= strStartDate && tx.date <= strEndDate);
+    };
+
+    const getFilteredRealizedTradesForReport = (realizedTrades) => {
+        const period = reportPeriodSelect.value;
+        const now = new Date();
+        let startDate, endDate;
+
+        switch(period) {
+            case 'current_month':
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                break;
+            case 'last_month':
+                startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                endDate = new Date(now.getFullYear(), now.getMonth(), 0);
+                break;
+            case 'current_year':
+                startDate = new Date(now.getFullYear(), 0, 1);
+                endDate = new Date(now.getFullYear(), 11, 31);
+                break;
+            case 'last_year':
+                startDate = new Date(now.getFullYear() - 1, 0, 1);
+                endDate = new Date(now.getFullYear() - 1, 11, 31);
+                break;
+            case 'all':
+            default:
+                return realizedTrades; 
+        }
+        
+        const formatDate = (date) => date.toISOString().split('T')[0];
+        const strStartDate = formatDate(startDate);
+        const strEndDate = formatDate(endDate);
+
+        return realizedTrades.filter(trade => trade.sellDate >= strStartDate && trade.sellDate <= strEndDate);
+    };
+    
+    const renderReports = () => {
+        const portfolioData = calculatePortfolio(); // Full portfolio data needed for some report calculations
+        const filteredTxForReport = getFilteredTransactionsForReport(); // For reports based on transaction dates
+        const filteredRealizedTrades = getFilteredRealizedTradesForReport(portfolioData.realizedTrades);
+
+        renderGroupByPieChart(filteredTxForReport);
+        renderRealizedPLByStockBarChart(filteredRealizedTrades); // Updated function call
+        renderRealizedPLByStockTable(portfolioData.realizedCapitalPLByTicker); // Pass the detailed realized data
+        renderUnrealizedPLByStockTable(portfolioData.holdings, portfolioData.dividendsByTicker);
+        renderPortfolioValueLineChart(filteredTxForReport);
+    };
+
+    reportPeriodSelect.addEventListener('change', renderReports);
+
+
+    // Chart Rendering Functions
+    const renderPortfolioPieChart = (holdings) => {
+        const ctx = document.getElementById('portfolioPieChart').getContext('2d');
+        const labels = Object.keys(holdings);
+        const data = Object.values(holdings).map(stock => stock.marketValue);
+        
+        const backgroundColors = ['#38bdf8', '#34d399', '#facc15', '#fb923c', '#a78bfa', '#f472b6', '#60a5fa', '#818cf8'];
+
+        if (portfolioPieChartInstance) {
+            portfolioPieChartInstance.destroy();
+            portfolioPieChartInstance = null;
+        }
+        portfolioPieChartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: labels.length > 0 ? labels : ['ไม่มีข้อมูล'],
+                datasets: [{
+                    label: 'มูลค่าพอร์ต',
+                    data: labels.length > 0 ? data : [1], // Placeholder if no data
+                    backgroundColor: labels.length > 0 ? backgroundColors : ['#e5e7eb'],
+                    borderColor: '#ffffff',
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { font: { family: 'Sarabun'}}},
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return `${context.label}: ${formatCurrency(context.raw)}`;
+                            }
+                        },
+                        bodyFont: { family: 'Sarabun' },
+                        titleFont: { family: 'Sarabun' }
+                    }
+                }
+            }
+        });
+    };
+
+    const renderGroupByPieChart = (filteredTransactions) => {
+        const ctx = document.getElementById('groupByPieChart').getContext('2d');
+        const groupData = {}; // groupId: totalValue
+        
+        filteredTransactions.filter(tx => tx.type === 'buy').forEach(tx => { // Consider only buy transactions for group investment value
+            const value = tx.quantity * tx.price + tx.commission;
+            const groupName = tx.groupId ? (settings.groups.find(g => g.id === tx.groupId) || {name: 'ไม่ระบุกลุ่ม'}).name : 'ไม่ระบุกลุ่ม';
+            groupData[groupName] = (groupData[groupName] || 0) + value;
+        });
+
+        const labels = Object.keys(groupData);
+        const data = Object.values(groupData);
+        const backgroundColors = ['#fbbf24', '#4ade80', '#f87171', '#c084fc', '#22d3ee', '#fca5a5', '#67e8f9', '#a5b4fc'];
+
+        if (groupByPieChartInstance) {
+            groupByPieChartInstance.destroy();
+            groupByPieChartInstance = null;
+        }
+        groupByPieChartInstance = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: labels.length > 0 ? labels : ['ไม่มีข้อมูล'],
+                datasets: [{
+                    label: 'มูลค่าลงทุนตามกลุ่ม',
+                    data: labels.length > 0 ? data : [1],
+                    backgroundColor: labels.length > 0 ? backgroundColors : ['#e5e7eb'],
+                    borderColor: '#ffffff',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { font: { family: 'Sarabun'}}},
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return `${context.label}: ${formatCurrency(context.raw)}`;
+                            }
+                        },
+                        bodyFont: { family: 'Sarabun' },
+                        titleFont: { family: 'Sarabun' }
+                    }
+                }
+            }
+        });
+    };
+    
+    // Renamed and modified function for Realized P/L by Individual Stock (Bar Chart)
+    const renderRealizedPLByStockBarChart = (filteredRealizedTrades) => {
+        const ctx = document.getElementById('realizedPLByStockBarChart').getContext('2d');
+        const stockPLData = {}; // ticker: totalRealizedPL (capital gain/loss + dividend)
+
+        filteredRealizedTrades.forEach(trade => {
+            stockPLData[trade.ticker] = (stockPLData[trade.ticker] || 0) + trade.realizedPL;
+        });
+
+        const labels = Object.keys(stockPLData);
+        const data = Object.values(stockPLData);
+        const backgroundColors = data.map(pl => pl >= 0 ? 'rgba(75, 192, 192, 0.6)' : 'rgba(255, 99, 132, 0.6)');
+        const borderColors = data.map(pl => pl >= 0 ? 'rgba(75, 192, 192, 1)' : 'rgba(255, 99, 132, 1)');
+
+
+        if (realizedPLByStockBarChartInstance) { // Updated instance variable
+            realizedPLByStockBarChartInstance.destroy();
+            realizedPLByStockBarChartInstance = null;
+        }
+        realizedPLByStockBarChartInstance = new Chart(ctx, { // Updated instance variable
+            type: 'bar',
+            data: {
+                labels: labels.length > 0 ? labels : ['ไม่มีข้อมูล'],
+                datasets: [{
+                    label: 'กำไร/ขาดทุนที่เกิดขึ้นแล้ว',
+                    data: labels.length > 0 ? data : [0],
+                    backgroundColor: labels.length > 0 ? backgroundColors : ['#e5e7eb'],
+                    borderColor: labels.length > 0 ? borderColors : ['#d1d5db'],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { 
+                        beginAtZero: true, 
+                        ticks: { callback: value => formatCurrency(value), font: { family: 'Sarabun' } } 
+                    },
+                    x: { ticks: { font: { family: 'Sarabun' } } }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return `${context.dataset.label}: ${formatCurrency(context.raw)}`;
+                            }
+                        },
+                        bodyFont: { family: 'Sarabun' },
+                        titleFont: { family: 'Sarabun' }
+                    }
+                }
+            }
+        });
+    };
+
+    // Function to render Realized P/L by Individual Stock (Now includes Dividends and more details)
+    const renderRealizedPLByStockTable = (realizedStockData) => { // Renamed parameter for clarity
+        realizedPLByStockTableBody.innerHTML = '';
+
+        const sortedStockData = Object.entries(realizedStockData).sort(([,dataA], [,dataB]) => {
+            // Sort by total combined realized PL (capital + dividends)
+            const totalPLA = dataA.totalCapitalPL + dataA.totalDividends;
+            const totalPLB = dataB.totalCapitalPL + dataB.totalDividends;
+            return totalPLB - totalPLA;
+        });
+
+        if (sortedStockData.length === 0) {
+            realizedPLByStockTableBody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-stone-500">ไม่มีข้อมูลกำไร/ขาดทุนที่เกิดขึ้นแล้ว (รวมปันผล)</td></tr>';
+            return;
+        }
+
+        sortedStockData.forEach(([ticker, data]) => {
+            const totalSoldQuantity = data.totalSoldQuantity;
+            const totalCostOfSoldShares = data.totalCostOfSoldShares;
+            const totalSellingValue = data.totalSellingValue;
+            const capitalPL = data.totalCapitalPL;
+            const dividend = data.totalDividends;
+            const totalCombinedPL = capitalPL + dividend;
+
+            const avgCostSold = totalSoldQuantity > 0 ? totalCostOfSoldShares / totalSoldQuantity : 0;
+            const avgSellingPrice = totalSoldQuantity > 0 ? totalSellingValue / totalSoldQuantity : 0;
+
+            const row = realizedPLByStockTableBody.insertRow();
+            const plClass = totalCombinedPL >= 0 ? 'text-green-600' : 'text-red-600';
+            row.innerHTML = `
+                <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-sky-700">${ticker}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${totalSoldQuantity.toLocaleString()}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${formatCurrency(avgCostSold)}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${formatCurrency(avgSellingPrice)}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${formatCurrency(dividend)}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm ${plClass}">${formatCurrency(totalCombinedPL)}</td>
+            `;
+        });
+    };
+
+    // Function to render Unrealized P/L by Individual Stock (Now includes Dividends)
+    const renderUnrealizedPLByStockTable = (holdings, dividendsByTicker) => {
+        unrealizedPLByStockTableBody.innerHTML = '';
+
+        const combinedPL = {};
+        const tickersInHoldings = Object.keys(holdings);
+        const allTickers = new Set([...tickersInHoldings, ...Object.keys(dividendsByTicker)]);
+
+        Array.from(allTickers).forEach(ticker => {
+            const stock = holdings[ticker] || { unrealizedPL: 0, quantity: 0, avgPrice: 0, marketValue: 0 };
+            // Corrected: Access totalDividends from realizedStockData object
+            const dividend = dividendsByTicker[ticker] ? dividendsByTicker[ticker].totalDividends : 0; 
+            const totalCombinedPL = stock.unrealizedPL + dividend;
+
+            combinedPL[ticker] = {
+                stock: stock,
+                dividend: dividend,
+                totalCombinedPL: totalCombinedPL
+            };
+        });
+
+        const sortedCombinedPL = Object.entries(combinedPL).sort(([,dataA], [,dataB]) => dataB.totalCombinedPL - dataA.totalCombinedPL);
+
+        if (sortedCombinedPL.length === 0) {
+            unrealizedPLByStockTableBody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-stone-500">ไม่มีหุ้นที่ถือครองเพื่อแสดงกำไร/ขาดทุนที่ยังไม่เกิดขึ้น (รวมปันผล)</td></tr>';
+            return;
+        }
+
+        sortedCombinedPL.forEach(([ticker, data]) => {
+            const stock = data.stock;
+            const dividend = data.dividend;
+            const totalCombinedPL = data.totalCombinedPL;
+
+            const unrealizedPLClass = totalCombinedPL >= 0 ? 'text-green-600' : 'text-red-600';
+            const marketPrice = settings.marketPrices[ticker] || stock.avgPrice; // ใช้ราคาตลาดที่กรอก หรือต้นทุนเฉลี่ยถ้าไม่มี
+
+            const row = unrealizedPLByStockTableBody.insertRow();
+            row.innerHTML = `
+                <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-sky-700">${ticker}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${stock.quantity.toLocaleString()}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${formatCurrency(stock.avgPrice)}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${formatCurrency(marketPrice)}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm">${formatCurrency(dividend)}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm ${unrealizedPLClass}">${formatCurrency(totalCombinedPL)}</td>
+            `;
+        });
+    };
+
+
+    const renderPortfolioValueLineChart = (filteredTransactions) => {
+        const ctx = document.getElementById('portfolioValueLineChart').getContext('2d');
+        // This is a simplified simulation. Accurate historical portfolio value requires daily prices or snapshots.
+        // Here, we'll plot cumulative investment cost from 'buy' transactions over time.
+        let cumulativeCost = 0;
+        const dataPoints = [];
+        
+        // Sort transactions by date to correctly calculate cumulative values
+        const sortedTx = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+        sortedTx.forEach(tx => {
+            if (tx.type === 'buy') {
+                cumulativeCost += (tx.quantity * tx.price) + tx.commission;
+            } else if (tx.type === 'sell') {
+                // A more accurate version would reduce portfolio value by the cost of shares sold (FIFO/LIFO)
+                // For this simplified version, we'll just reduce by sell value (which isn't "portfolio value")
+                // Or, to keep it simpler, we can show "Net Investment"
+                // Let's stick to showing cumulative *cost* for buys as a proxy for "investment value"
+            } else if (tx.type === 'dividend') {
+                // Dividends don't directly affect the "cost" of the portfolio for this chart's purpose
+            }
+            dataPoints.push({ x: tx.date, y: cumulativeCost });
+        });
+
+        // Consolidate data points for the same date, taking the last value for that date
+        const consolidatedDataPoints = [];
+        const dateMap = new Map();
+        dataPoints.forEach(point => {
+            dateMap.set(point.x, point.y);
+        });
+        consolidatedDataPoints.push(...Array.from(dateMap.entries()).map(([x, y]) => ({x, y})));
+        consolidatedDataPoints.sort((a,b) => new Date(a.x) - new Date(b.x));
+
+
+        if (portfolioValueLineChartInstance) {
+            portfolioValueLineChartInstance.destroy();
+            portfolioValueLineChartInstance = null;
+        }
+        portfolioValueLineChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'มูลค่าลงทุนสะสม (จำลอง)',
+                    data: consolidatedDataPoints.length > 0 ? consolidatedDataPoints : [{x: new Date().toISOString().split('T')[0], y: 0}],
+                    borderColor: '#0ea5e9', // sky-500
+                    backgroundColor: 'rgba(14, 165, 233, 0.1)',
+                    tension: 0.1,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { 
+                        type: 'time', 
+                        time: { unit: 'month', tooltipFormat: 'dd MMM sebagaimana', displayFormats: {'month': 'MMM sebagaimana'}},
+                        ticks: { font: { family: 'Sarabun' } }
+                    },
+                    y: { 
+                        beginAtZero: true, 
+                        ticks: { callback: value => formatCurrency(value), font: { family: 'Sarabun' } }
+                    }
+                },
+                plugins: {
+                    legend: { position: 'top', labels: { font: { family: 'Sarabun'}}},
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return `${context.dataset.label}: ${formatCurrency(context.parsed.y)}`;
+                            }
+                        },
+                        bodyFont: { family: 'Sarabun' },
+                        titleFont: { family: 'Sarabun' }
+                    }
+                }
+            }
+        });
+    };
+
+
+    // Initial Load & Refresh
+    const refreshAllViews = () => {
+        renderGroups(); 
+        renderPortfolio();
+        renderTransactionsLog(); 
+        renderReports(); 
+        renderMarketPriceInputs(); 
+    };
+    
+    // Modal event listeners
+    closeModalButton.onclick = hideModal;
+    modalCancelButton.onclick = hideModal;
+    modalConfirmButton.onclick = () => {
+        if (typeof confirmAction === 'function') {
+            confirmAction();
+        }
+    };
+    window.onclick = (event) => {
+        if (event.target == confirmationModal) {
+            hideModal();
+        }
+    };
+
+
+    // App Initialization
+    document.addEventListener('DOMContentLoaded', () => {
+        loadData(); // โหลดข้อมูลจาก Local Storage เมื่อหน้าเว็บโหลดเสร็จ
+        // refreshAllViews(); // REMOVED: This is now handled by setActiveSection('overview')
+        
+        // ตั้งค่า initial UI
+        setActiveSection('overview'); // This will trigger the first refreshAllViews
+        const today = new Date().toISOString().split('T')[0];
+        // Set default date for both forms
+        stockTxDateInput.value = today;
+        dividendTxDateInput.value = today;
+
+        // Initialize report period select to "all"
+        reportPeriodSelect.value = "all";
+    });
+
+</script>
+</body>
+</html>
